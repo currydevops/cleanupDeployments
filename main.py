@@ -1,6 +1,6 @@
 import boto3
 from collections import defaultdict
-
+import logging
 
 class DeploymentManager:
     def __init__(self, bucket_name):
@@ -16,6 +16,9 @@ class DeploymentManager:
         # Create an S3 client
         self.s3_client = self.session.client('s3', endpoint_url='http://localhost:4566')
 
+        # Configure logging
+        logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.INFO)
+
     def get_list_of_deployments(self):
         """
         Retrieve the list of objects (deployments) in the S3 bucket.
@@ -23,11 +26,15 @@ class DeploymentManager:
         Returns:
             list: A list of objects representing the deployments in the S3 bucket.
         """
-        response = self.s3_client.list_objects_v2(Bucket=self.bucket_name)
-        deployments = []
-        if 'Contents' in response:
-            deployments = response['Contents']
-        return deployments
+        try:
+            response = self.s3_client.list_objects_v2(Bucket=self.bucket_name)
+            deployments = []
+            if 'Contents' in response:
+                deployments = response['Contents']
+            return deployments
+        except Exception as e:
+            logging.error(f"An error occurred while retrieving deployments: {e}")
+            return []
 
     def group_deployments(self, objects):
         """
@@ -84,22 +91,22 @@ class DeploymentManager:
         deployments_list = self.get_list_of_deployments()
         # Group deployments by their names
         ordered_deployments = self.group_deployments(objects=deployments_list)
-        print(ordered_deployments)
         # Sort deployments by their upload dates
         sorted_deployments = self.sort_deployments_by_upload_date(ordered_deployments)
         # Get deployments to be deleted
+        logging.info(f'There are total of {len(sorted_deployments)} deployments we are keeping {keep_x_deployment} deployments')
         x_deployment = sorted_deployments[keep_x_deployment:]
+        logging.info(f'These deployments will be deleted {x_deployment}')
         # Create an S3 resource to delete objects
         s3_resource = self.session.resource('s3', endpoint_url='http://localhost:4566')
         # Iterate over deployments to be deleted
         for deployment in x_deployment:
-            print(deployment)
             # Iterate over objects in the S3 bucket
             for obj in deployments_list:
                 if obj['Key'].startswith(deployment):
                     # Delete objects associated with the deployment
                     s3_resource.Object(bucket_name, obj['Key']).delete()
-            print(f"Deleted deployment: {deployment}")
+            logging.info(f"Deleted deployment: {deployment}")
 
 
 if __name__ == '__main__':
