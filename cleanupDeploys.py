@@ -1,9 +1,13 @@
 #!/usr/bin/env python
 
+# Contributor: Roshan Patel
+
 import argparse
 import boto3
 from collections import defaultdict
 import logging
+from datetime import datetime, timedelta
+
 
 class DeploymentManager:
     def __init__(self, bucket_name, profile_name):
@@ -95,7 +99,7 @@ class DeploymentManager:
         ordered_deployments = self.group_deployments(objects=deployments_list)
         # Sort deployments by their upload dates
         sorted_deployments = self.sort_deployments_by_upload_date(ordered_deployments)
-        logging.info(f'There are total of {len(sorted_deployments)} deployments we are keeping {keep_x_deployment} deployments')
+        logging.info(f'There are total of {len(sorted_deployments)} deployments, and we are keeping {keep_x_deployment} deployments')
         x_deployment = sorted_deployments[keep_x_deployment:]
         logging.info(f'These deployments will be deleted {x_deployment}')
         # Create an S3 resource to delete objects
@@ -109,11 +113,29 @@ class DeploymentManager:
                     s3_resource.Object(bucket_name, obj['Key']).delete()
             logging.info(f"Deleted deployment: {deployment}")
 
-    def delete_deployments_xdays_ydeploys(self, keep_x_days, y_deploys):
+    def delete_deployments_xdays_ydeploys(self, x_days, y_deploys):
         deployments_list = self.get_list_of_deployments()
         # Group deployments by their names
         sorted_deployments = sorted(deployments_list, key=lambda x: x['LastModified'], reverse=True)
 
+        # Determine a retention threshold based on the requirement to maintain at least Y deployments \
+        # This will ensure that the script retains a minimum number of deployments even after cleanup
+        retention_threshold = min(len(sorted_deployments), y_deploys)
+        print(retention_threshold)
+        # Determine cutoff date for retaining deployments
+        cutoff_date = datetime.now() - timedelta(days=x_days)
+        cutoff_date = cutoff_date.astimezone(deployments_list[0]['LastModified'].tzinfo) # convert to match s3 modified_date format
+
+        # Iterate through deployments, delete older ones beyond retention threshold
+        deleted_deployments = 0
+        # print(sorted_deployments[:retention_threshold])
+        for deployment in sorted_deployments[retention_threshold:]:
+            if deployment['LastModified'] < cutoff_date:
+                # Delete the deployment
+                self.s3_client.delete_object(Bucket=self.bucket_name, Key=deployment['Key'])
+                deleted_deployments += 1
+
+        return deleted_deployments
 
 
 if __name__ == '__main__':
@@ -127,6 +149,9 @@ if __name__ == '__main__':
     manager = DeploymentManager(bucket_name, profile_name='localstack')
     # Delete old deployments, keeping only the most recent ones
     manager.delete_deployments(args.keep_x_deployments)
+
+    # Delete old deployments, keeping only the x days and y deploys
+    # manager.delete_deployments_xdays_ydeploys(x_days=2, y_deploys=3)
 
 '''
 List Objects in Bucket: get_list_of_deployments()
